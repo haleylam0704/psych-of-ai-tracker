@@ -5,10 +5,11 @@ Generates both data.json (for GitHub Pages fetch) and embeds data into index.htm
 """
 
 import json
+import re
 from pathlib import Path
 
 DATA_DIR = Path(__file__).parent.parent / "data"
-SITE_DIR = Path(__file__).parent.parent / "site"
+SITE_DIR = Path(__file__).parent.parent / "docs"
 PAPERS_FILE = DATA_DIR / "papers.json"
 SITE_DATA_FILE = SITE_DIR / "data.json"
 HTML_FILE = SITE_DIR / "index.html"
@@ -22,7 +23,6 @@ def build():
 
     papers = data["papers"]
 
-    # Filter to relevant papers only (or unclassified — show those too so site isn't empty before classification)
     filtered = []
     for p in papers:
         if p.get("relevant") is False:
@@ -66,15 +66,23 @@ def build():
     # Embed data into HTML so it works with file:// protocol too
     html = HTML_FILE.read_text()
     data_json = json.dumps(output)
-    # Replace the placeholder in the HTML
+    embed_line = f"const EMBEDDED_DATA = {data_json};"
+
+    # Match either the placeholder marker OR a previous embed
     marker = "/* __EMBEDDED_DATA__ */"
     if marker in html:
-        html = html.replace(marker, f"const EMBEDDED_DATA = {data_json};")
-        HTML_FILE.write_text(html)
-        print("Embedded data into index.html.")
+        html = html.replace(marker, embed_line)
     else:
-        print("Warning: Could not find embed marker in index.html. Data not embedded.")
+        # Replace previous embedded data (starts with "const EMBEDDED_DATA = ")
+        html = re.sub(
+            r'const EMBEDDED_DATA = .+;',
+            lambda m: embed_line,
+            html,
+            count=1,
+        )
 
+    HTML_FILE.write_text(html)
+    print(f"Embedded data into index.html.")
     print(f"Built site data: {len(filtered)} papers across {len(topic_counts)} topics.")
 
 

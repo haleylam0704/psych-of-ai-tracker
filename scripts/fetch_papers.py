@@ -1,6 +1,11 @@
 """
 Fetch papers from OpenAlex API.
 No API key needed — just a polite email for faster rate limits.
+
+Two-pass strategy per query:
+  1. Sort by date (newest papers)
+  2. Sort by cited_by_count (most influential papers)
+This ensures we get both recent and landmark papers.
 """
 
 import json
@@ -17,7 +22,7 @@ PAPERS_FILE = DATA_DIR / "papers.json"
 BASE_URL = "https://api.openalex.org/works"
 
 
-def load_existing_papers() -> dict:
+def load_existing_papers():
     """Load existing papers database. Keys are OpenAlex IDs for dedup."""
     if PAPERS_FILE.exists():
         with open(PAPERS_FILE) as f:
@@ -26,14 +31,14 @@ def load_existing_papers() -> dict:
     return {}
 
 
-def fetch_query(query: str, per_page: int = 50, max_pages: int = 4) -> list:
+def fetch_query(query, sort="publication_date:desc", per_page=50, max_pages=4):
     """Fetch papers for a single search query from OpenAlex."""
     papers = []
     for page in range(1, max_pages + 1):
         params = urllib.parse.urlencode({
             "search": query,
             "filter": "type:article,language:en",
-            "sort": "publication_date:desc",
+            "sort": sort,
             "per_page": per_page,
             "page": page,
             "mailto": OPENALEX_EMAIL,
@@ -47,14 +52,14 @@ def fetch_query(query: str, per_page: int = 50, max_pages: int = 4) -> list:
             if not results:
                 break
             papers.extend(results)
-            time.sleep(0.15)  # polite rate limiting
+            time.sleep(0.15)
         except Exception as e:
-            print(f"  Error fetching page {page}: {e}")
+            print(f"    Error fetching page {page}: {e}")
             break
     return papers
 
 
-def parse_paper(raw: dict, search_topic: str):
+def parse_paper(raw, search_topic):
     """Extract relevant fields from an OpenAlex work object."""
     openalex_id = raw.get("id", "")
     if not openalex_id:
@@ -64,7 +69,6 @@ def parse_paper(raw: dict, search_topic: str):
     abstract = ""
     inv_index = raw.get("abstract_inverted_index")
     if inv_index:
-        # Reconstruct abstract from inverted index
         word_positions = []
         for word, positions in inv_index.items():
             for pos in positions:
@@ -76,7 +80,6 @@ def parse_paper(raw: dict, search_topic: str):
     if not title:
         return None
 
-    # Authors
     authors = []
     for authorship in raw.get("authorships", [])[:10]:
         author = authorship.get("author", {})
@@ -84,7 +87,6 @@ def parse_paper(raw: dict, search_topic: str):
         if name:
             authors.append(name)
 
-    # Journal
     source = raw.get("primary_location", {}) or {}
     source_obj = source.get("source", {}) or {}
     journal = source_obj.get("display_name", "")
@@ -100,36 +102,52 @@ def parse_paper(raw: dict, search_topic: str):
         "cited_by_count": raw.get("cited_by_count", 0),
         "open_access": raw.get("open_access", {}).get("is_oa", False),
         "search_topics": [search_topic],
-        "classified_topic": None,  # filled by classify step
+        "classified_topic": None,
         "secondary_topic": None,
-        "relevant": None,  # filled by classify step
+        "relevant": None,
         "confidence": None,
     }
+
+
+def merge_paper(existing, parsed, topic_key):
+    """Merge a parsed paper into the existing database."""
+    pid = parsed["id"]
+    if pid in existing:
+        if topic_key not in existing[pid]["search_topics"]:
+            existing[pid]["search_topics"].append(topic_key)
+        # Always update citation count to latest
+        existing[pid]["cited_by_count"] = max(
+            existing[pid]["cited_by_count"], parsed["cited_by_count"]
+        )
+        return False  # not new
+    else:
+        existing[pid] = parsed
+        return True  # new
 
 
 def fetch_all():
     """Fetch papers for all subtopics and merge with existing database."""
     existing = load_existing_papers()
     new_count = 0
+    pages_per_sort = max(1, (MAX_RESULTS_PER_TOPIC // 50) // 2)
 
     for topic_key, topic_info in SUBTOPICS.items():
         print(f"\nFetching: {topic_info['name']}")
         for query in topic_info["queries"]:
-            print(f"  Query: {query}")
-            raw_papers = fetch_query(query, per_page=50, max_pages=MAX_RESULTS_PER_TOPIC // 50)
-            for raw in raw_papers:
+            # Pass 1: newest papers
+            print(f"  [{query}] newest...")
+            for raw in fetch_query(query, sort="publication_date:desc",
+                                   per_page=50, max_pages=pages_per_sort):
                 parsed = parse_paper(raw, topic_key)
-                if not parsed:
-                    continue
-                pid = parsed["id"]
-                if pid in existing:
-                    # Dedup: just add the new search topic
-                    if topic_key not in existing[pid]["search_topics"]:
-                        existing[pid]["search_topics"].append(topic_key)
-                    # Update citation count (may have changed)
-                    existing[pid]["cited_by_count"] = parsed["cited_by_count"]
-                else:
-                    existing[pid] = parsed
+                if parsed and merge_paper(existing, parsed, topic_key):
+                    new_count += 1
+
+            # Pass 2: most cited papers (the landmark/influential ones)
+            print(f"  [{query}] most cited...")
+            for raw in fetch_query(query, sort="cited_by_count:desc",
+                                   per_page=50, max_pages=pages_per_sort):
+                parsed = parse_paper(raw, topic_key)
+                if parsed and merge_paper(existing, parsed, topic_key):
                     new_count += 1
 
     # Save

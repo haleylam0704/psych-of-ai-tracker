@@ -4,7 +4,7 @@ Defines subtopics, their search queries, and classification prompts.
 """
 
 # Email for OpenAlex polite pool (faster rate limits, no key needed)
-OPENALEX_EMAIL = "haleylam@example.com"  # TODO: replace with your real email
+OPENALEX_EMAIL = "haleylam0704@gmail.com"
 
 # How many results to fetch per subtopic per run
 MAX_RESULTS_PER_TOPIC = 200
