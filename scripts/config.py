@@ -16,10 +16,12 @@ SUBTOPICS = {
         "name": "Trust & Reliance on AI",
         "description": "How trust in AI is formed, calibrated, and maintained; appropriate vs. inappropriate reliance on AI recommendations.",
         "queries": [
-            "trust artificial intelligence",
+            "trust in AI systems",
+            "trust in artificial intelligence",
             "reliance AI recommendations",
             "trust large language models",
             "AI trust calibration",
+            "human trust AI",
         ],
     },
     "anthropomorphism": {

@@ -41,7 +41,7 @@ def build():
             "abstract": p.get("abstract", "")[:500],
         })
 
-    filtered.sort(key=lambda x: x.get("date", ""), reverse=True)
+    filtered.sort(key=lambda x: x.get("date") or "", reverse=True)
 
     topic_counts = {}
     for p in filtered:
