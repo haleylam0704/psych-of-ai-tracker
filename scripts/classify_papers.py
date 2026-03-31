@@ -21,7 +21,7 @@ MODEL = "claude-haiku-4-5-20251001"
 API_URL = "https://api.anthropic.com/v1/messages"
 
 # Batch size for classification (process N papers per API call to save costs)
-BATCH_SIZE = 10
+BATCH_SIZE = 20
 
 
 def classify_single(title: str, abstract: str) -> dict:
@@ -76,7 +76,11 @@ def classify_batch(papers: list) -> list:
     # Build batch prompt
     paper_entries = []
     for i, p in enumerate(papers):
-        paper_entries.append(f"[{i}] Title: {p['title']}\nAbstract: {p['abstract'][:800]}")
+        abstract = (p.get('abstract') or '')[:800]
+        entry = f"[{i}] Title: {p['title']}"
+        if abstract:
+            entry += f"\nAbstract: {abstract}"
+        paper_entries.append(entry)
 
     batch_prompt = f"""You are classifying psychology research papers about AI/LLMs.
 
@@ -96,7 +100,7 @@ Papers:
 
     payload = json.dumps({
         "model": MODEL,
-        "max_tokens": 1500,
+        "max_tokens": 3000,
         "messages": [{"role": "user", "content": batch_prompt}],
     }).encode()
 
@@ -132,8 +136,8 @@ def classify_all():
         data = json.load(f)
 
     papers = data["papers"]
-    unclassified = [p for p in papers if p.get("relevant") is None and p.get("abstract")]
-    print(f"Found {len(unclassified)} unclassified papers with abstracts.")
+    unclassified = [p for p in papers if p.get("relevant") is None]
+    print(f"Found {len(unclassified)} unclassified papers.")
 
     # Process in batches
     for i in range(0, len(unclassified), BATCH_SIZE):
@@ -149,7 +153,14 @@ def classify_all():
 
         time.sleep(0.5)  # rate limit politeness
 
-    # Save
+        # Save progress every 50 batches so we don't lose work on failure
+        if (i // BATCH_SIZE + 1) % 50 == 0:
+            with open(PAPERS_FILE, "w") as f:
+                json.dump(data, f, indent=2)
+            classified_so_far = sum(1 for p in papers if p.get("relevant") is not None)
+            print(f"  [checkpoint: {classified_so_far}/{len(papers)} classified]")
+
+    # Final save
     with open(PAPERS_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
