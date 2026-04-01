@@ -34,6 +34,14 @@ jobs:
         working-directory: scripts
         run: python build_site.py
 
+      - name: Save data as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: papers-data
+          path: data/papers.json
+          retention-days: 30
+
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
